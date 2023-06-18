@@ -1,3 +1,4 @@
+mod highlight;
 pub mod raw_input;
 pub mod scroll;
 pub mod widgets;
@@ -70,10 +71,8 @@ fn cleanup_terminal(terminal: &mut Terminal) -> Result<()> {
 impl Tui {
     pub fn new(config: &Config, profiler_addr: Addr<crate::profiler::Profiler>) -> Result<Self> {
         let terminal = setup_terminal()?;
-        let code: Vec<String> = std::fs::read_to_string(&config.python_code)?
-            .lines()
-            .map(|s| s.to_string())
-            .collect();
+        let code: Vec<String> =
+            highlight::highlight(&std::fs::read_to_string(&config.python_code)?);
         let title = {
             let filename = Path::new(&config.python_code)
                 .file_name()
