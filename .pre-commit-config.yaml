@@ -1,0 +1,48 @@
+default_install_hook_types: [pre-commit, pre-push, commit-msg]
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.4.0
+    hooks:
+    - id: check-yaml
+      stages: [commit]
+    - id: check-json
+      stages: [commit]
+    - id: check-toml
+      stages: [commit]
+    - id: check-merge-conflict
+      stages: [commit]
+    - id: check-case-conflict
+      stages: [commit]
+    - id: detect-private-key
+      stages: [commit]
+  - repo: https://github.com/crate-ci/typos
+    rev: v1.15.0
+    hooks:
+    - id: typos
+      pass_filenames: false
+      args: []
+      stages: [commit]
+  - repo: https://github.com/crate-ci/committed
+    rev: v1.0.17
+    hooks:
+    - id: committed
+      always_run: true
+      stages: [commit-msg]
+  - repo: https://github.com/doublify/pre-commit-rust
+    rev: v1.0
+    hooks:
+    - id: fmt
+      stages: [pre-push]
+    - id: cargo-check
+      stages: [pre-push]
+    - id: clippy
+      stages: [pre-push]
+  - repo: local
+    hooks:
+    - id: cargo-deny
+      name: cargo deny
+      entry: cargo deny check
+      language: system
+      files: \.rs$
+      pass_filenames: false
+      stages: [pre-push]
