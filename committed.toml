@@ -1,0 +1,4 @@
+style = "conventional"
+subject_capitalized = false
+merge_commit = false
+ignore_author_re = "(dependabot|renovate|github-actions)"

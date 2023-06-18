@@ -1,0 +1,5 @@
+[files]
+extend-exclude = ["src/bpf/vmlinux.h"]
+
+[default]
+extend-ignore-identifiers-re = ["ratatui"]
