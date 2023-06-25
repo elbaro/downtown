@@ -15,6 +15,7 @@ use tonari_actor::{Actor, Addr, Context};
 
 use crate::{
     cli::Config,
+    error::Error,
     profiler::{
         hist::{format_ns, Summary},
         ProfilerMessage,
@@ -75,7 +76,12 @@ impl Tui {
     pub fn new(config: &Config, profiler_addr: Addr<crate::profiler::Profiler>) -> Result<Self> {
         let terminal = setup_terminal()?;
         let code: Vec<String> =
-            highlight::highlight(&std::fs::read_to_string(&config.python_code)?);
+            highlight::highlight(&std::fs::read_to_string(&config.python_code).map_err(
+                |source| Error::CannotReadFile {
+                    source,
+                    path: config.python_code.clone(),
+                },
+            )?);
         let title = {
             let filename = Path::new(&config.python_code)
                 .file_name()

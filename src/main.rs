@@ -1,4 +1,5 @@
 pub mod cli;
+pub mod error;
 pub mod profiler;
 pub mod tui;
 
@@ -29,7 +30,15 @@ fn main() -> Result<()> {
         .map_err(|_| color_eyre::eyre::eyre!("The program needs to run in privileged mode"))?;
 
     let config = Config::new(args)?;
+    validate_config(&config)?;
     run_system(config)?;
+    Ok(())
+}
+
+fn validate_config(_config: &Config) -> Result<()> {
+    // config.pid
+    // config.python_code
+    // config.python_bin
     Ok(())
 }
 
@@ -42,8 +51,8 @@ fn run_system(config: Config) -> Result<()> {
     {
         let system = system.clone();
         let tui_addr = tui_addr.clone();
-        std::thread::spawn(move || raw_input::drain(system, tui_addr).unwrap());
-    }
+        std::thread::spawn(move || raw_input::drain(system, tui_addr).unwrap())
+    };
 
     let python_code = config.python_code.clone();
     let profiler_addr = system
@@ -58,7 +67,7 @@ fn run_system(config: Config) -> Result<()> {
 
     std::thread::spawn(move || loop {
         std::thread::sleep(Duration::from_secs(2));
-        let _ = profiler_addr.send(ProfilerMessage::Observe);
+        profiler_addr.send(ProfilerMessage::Observe).unwrap();
     });
 
     system.run()?;

@@ -3,6 +3,8 @@ use clap_verbosity_flag::Verbosity;
 use color_eyre::{eyre::ContextCompat, Result};
 use std::path::Path;
 
+use crate::error::Error;
+
 #[derive(Parser)]
 #[command(version)]
 pub struct Args {
@@ -30,7 +32,11 @@ impl Config {
             pid: args.pid,
             python_bin: determine_python(&args),
             python_code: Path::new(&args.python_code)
-                .canonicalize()?
+                .canonicalize()
+                .map_err(|source| Error::CannotReadFile {
+                    source,
+                    path: args.python_code.clone(),
+                })?
                 .to_str()
                 .context("python code path is not UTF-8")?
                 .to_string(),
