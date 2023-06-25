@@ -28,6 +28,8 @@ pub type LineNum = usize;
 pub enum TuiMessage {
     ScrollUp,
     ScrollDown,
+    PageUp,
+    PageDown,
     Enter,
     Render,
     Profile(HashMap<LineNum, Summary>),
@@ -133,19 +135,6 @@ impl Tui {
             };
             frame.render_widget(Clear, frame.size());
             frame.render_widget(table, frame.size());
-
-            // let block = Block::default()
-            //     .title(self.title.as_str())
-            //     .borders(ratatui::widgets::Borders::ALL)
-            //     .border_type(ratatui::widgets::BorderType::Rounded);
-            // let area = block.inner(frame.size());
-            // frame.render_widget(block, frame.size());
-
-            // for (_filter, summary) in &self.summary_map {
-            //     frame.render_widget(Clear, area);
-            //     frame.render_widget(widgets::table::Table(summary_to_table(summary)), area);
-            //     break;
-            // }
         })?;
         Ok(())
     }
@@ -171,11 +160,19 @@ impl Actor for Tui {
     ) -> Result<(), Self::Error> {
         match message {
             TuiMessage::ScrollUp => {
-                self.scroll.up();
+                self.scroll.up(1);
                 self.render()?;
             }
             TuiMessage::ScrollDown => {
-                self.scroll.down();
+                self.scroll.down(1);
+                self.render()?;
+            }
+            TuiMessage::PageUp => {
+                self.scroll.up(10);
+                self.render()?;
+            }
+            TuiMessage::PageDown => {
+                self.scroll.down(10);
                 self.render()?;
             }
             TuiMessage::Enter => {

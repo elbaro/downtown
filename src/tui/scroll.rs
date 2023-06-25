@@ -15,24 +15,25 @@ impl Scroll {
             scroll_offset: 0,
         }
     }
-    pub fn up(&mut self) {
-        if self.current_line == 0 {
-            return;
+    pub fn up(&mut self, delta: usize) {
+        if delta <= self.current_line {
+            self.current_line -= delta;
+        } else {
+            self.current_line = 0;
         }
 
-        if self.scroll_offset == self.current_line {
-            self.scroll_offset -= 1;
+        if self.scroll_offset > self.current_line {
+            self.scroll_offset = self.current_line;
         }
-        self.current_line -= 1;
     }
-    pub fn down(&mut self) {
-        if self.current_line + 1 == self.num_lines {
-            return;
+    pub fn down(&mut self, delta: usize) {
+        if self.current_line + delta < self.num_lines {
+            self.current_line += delta;
+        } else {
+            self.current_line = self.num_lines - 1;
         }
-
-        self.current_line += 1;
-        if self.scroll_offset + self.widget_height == self.current_line {
-            self.scroll_offset += 1;
+        if self.scroll_offset + self.widget_height <= self.current_line {
+            self.scroll_offset = self.current_line - self.widget_height;
         }
     }
 
