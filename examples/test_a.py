@@ -1,9 +1,12 @@
-from test_b import f, g
+from test_b import A
+
+a = A()
 
 
 def h():
-    f()
-    g()
+    a.f()
+    a.g()
+
 
 while True:
     h()

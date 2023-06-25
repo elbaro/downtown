@@ -26,19 +26,6 @@ impl Widget for Table {
                 let line = &text.lines[0];
                 buf.set_line(area.x, y, line, area.width);
             }
-
-            // buf.set_stringn(
-            //     area.x,
-            //     y,
-            //     line,
-            //     area.width as usize,
-            //     if y == highlight_y {
-            //         ratatui::style::Style::default()
-            //             .add_modifier(ratatui::style::Modifier::REVERSED)
-            //     } else {
-            //         ratatui::style::Style::default()
-            //     },
-            // );
         }
     }
 }
