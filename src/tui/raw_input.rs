@@ -14,6 +14,8 @@ pub fn drain(system: SystemHandle, tui_addr: Addr<Tui>) -> Result<()> {
                 }
                 KeyCode::Up => tui_addr.send(TuiMessage::ScrollUp)?,
                 KeyCode::Down => tui_addr.send(TuiMessage::ScrollDown)?,
+                KeyCode::PageUp => tui_addr.send(TuiMessage::PageUp)?,
+                KeyCode::PageDown => tui_addr.send(TuiMessage::PageDown)?,
                 KeyCode::Enter => tui_addr.send(TuiMessage::Enter)?,
                 _ => {}
             },
