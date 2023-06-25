@@ -30,6 +30,7 @@ struct HistogramKey {
     pub bucket: u64,
 }
 
+#[derive(Debug)]
 pub enum ProfilerMessage {
     Attach(ProfileTarget),
     Detach(ProfileTarget),
@@ -83,12 +84,16 @@ impl Actor for Profiler {
                             target: target.clone(),
                             usdt_name: *usdt,
                         },
-                        self.skel.obj.prog_mut(usdt.as_str()).unwrap().attach_usdt(
-                            target.pid,
-                            &target.python_bin,
-                            USDT_PROVIDER,
-                            usdt.as_str(),
-                        )?,
+                        self.skel
+                            .obj
+                            .prog_mut(usdt.as_str())
+                            .expect("bpf program error")
+                            .attach_usdt(
+                                target.pid,
+                                &target.python_bin,
+                                USDT_PROVIDER,
+                                usdt.as_str(),
+                            )?,
                     );
                 }
             }

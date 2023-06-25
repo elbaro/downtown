@@ -1,16 +1,24 @@
 use color_eyre::Result;
 use crossterm::event::{Event, KeyCode};
-use tonari_actor::{Addr, SystemHandle};
+use futures::StreamExt;
+use tonari_actor::Addr;
 
-use crate::tui::{Tui, TuiMessage};
+use crate::{
+    error::Error,
+    tui::{Tui, TuiMessage},
+};
 
-pub fn drain(system: SystemHandle, tui_addr: Addr<Tui>) -> Result<()> {
+pub async fn drain_term_input(tui_addr: Addr<Tui>) -> Result<()> {
+    let mut stream = crossterm::event::EventStream::new();
     loop {
-        let ev = crossterm::event::read()?;
+        let ev: Option<Result<_, _>> = stream.next().await;
+        let ev = ev.ok_or(Error::InputStreamClosed)?;
+        let ev = ev.map_err(|source| Error::InputStreamError { source })?;
+
         match ev {
             Event::Key(ev) => match ev.code {
                 KeyCode::Char('q') => {
-                    system.shutdown()?;
+                    break;
                 }
                 KeyCode::Up => tui_addr.send(TuiMessage::ScrollUp)?,
                 KeyCode::Down => tui_addr.send(TuiMessage::ScrollDown)?,
@@ -24,5 +32,6 @@ pub fn drain(system: SystemHandle, tui_addr: Addr<Tui>) -> Result<()> {
             _ => {}
         }
     }
-    // Ok(())
+    log::debug!("drain_term_input() finished");
+    Ok(())
 }

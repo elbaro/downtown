@@ -1,6 +1,6 @@
 pub const USDT_PROVIDER: &str = "python";
 
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ProfileTarget {
     pub pid: i32,
     pub python_bin: String,

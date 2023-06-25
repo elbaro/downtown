@@ -5,4 +5,8 @@ pub enum Error {
         source: std::io::Error,
         path: String,
     },
+    #[error("Input stream is clsoed")]
+    InputStreamClosed,
+    #[error("Input stream has an error")]
+    InputStreamError { source: std::io::Error },
 }

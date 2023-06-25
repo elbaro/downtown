@@ -13,8 +13,11 @@ use crate::{
 use clap::Parser;
 
 use color_eyre::Result;
+use futures::future::Either;
 use ratatui::backend::CrosstermBackend;
-use tonari_actor::{Addr, System};
+use tokio::pin;
+use tokio_util::sync::CancellationToken;
+use tonari_actor::{Addr, System, SystemHandle};
 
 pub type Terminal = ratatui::Terminal<CrosstermBackend<std::io::Stdout>>;
 
@@ -43,33 +46,105 @@ fn validate_config(_config: &Config) -> Result<()> {
 }
 
 fn run_system(config: Config) -> Result<()> {
+    let cancel_token = CancellationToken::new();
     let mut system = System::new("default");
 
     let profiler_addr = Addr::default();
     let tui_addr = system.spawn(Tui::new(&config, profiler_addr.clone())?)?;
     tui_addr.send(TuiMessage::Render)?;
-    {
-        let system = system.clone();
-        let tui_addr = tui_addr.clone();
-        std::thread::spawn(move || raw_input::drain(system, tui_addr).unwrap())
-    };
 
     let python_code = config.python_code.clone();
-    let profiler_addr = system
-        .prepare_fn(|| Profiler::new(python_code, tui_addr).unwrap())
-        .with_addr(profiler_addr)
-        .spawn()?;
+    let profiler_addr = {
+        let tui_addr = tui_addr.clone();
+        system
+            .prepare_fn(|| {
+                let result = Profiler::new(python_code, tui_addr);
+                result.unwrap()
+            })
+            .with_addr(profiler_addr)
+            .spawn()
+            .unwrap()
+    };
 
     profiler_addr.send(ProfilerMessage::Attach(ProfileTarget {
         pid: config.pid,
         python_bin: config.python_bin,
     }))?;
 
-    std::thread::spawn(move || loop {
-        std::thread::sleep(Duration::from_secs(2));
-        profiler_addr.send(ProfilerMessage::Observe).unwrap();
-    });
+    let helper_thread = {
+        let system: SystemHandle = system.clone();
+        let cancel_token = cancel_token.clone();
+        std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_time()
+                .build()
+                .unwrap();
 
+            // task1 and task2 gracefully exit on cancel.
+            // task1 and task2 cancel when they fail.
+            rt.block_on(async {
+                // task 1
+                {
+                    let cancel_token = cancel_token.clone();
+                    tokio::spawn(async move {
+                        let cancelled = cancel_token.cancelled();
+                        let fut = raw_input::drain_term_input(tui_addr);
+                        pin!(cancelled);
+                        pin!(fut);
+                        match futures::future::select(cancelled, fut).await {
+                            Either::Left(_) => {} // cancelled
+                            Either::Right((result, _)) => {
+                                if let Err(err) = result {
+                                    log::error!("Error in raw_input thread: {}", err);
+                                }
+                                cancel_token.cancel();
+                            }
+                        }
+                    });
+                }
+
+                // task 2
+                {
+                    let cancel_token = cancel_token.clone();
+                    tokio::spawn(async move {
+                        let cancelled = cancel_token.cancelled();
+                        let fut = async {
+                            loop {
+                                tokio::time::sleep(Duration::from_secs(1)).await;
+                                if let Err(err) = profiler_addr.send(ProfilerMessage::Observe) {
+                                    match err.reason {
+                                        tonari_actor::SendErrorReason::Full => {}
+                                        tonari_actor::SendErrorReason::Disconnected => {
+                                            log::error!("Profiler actor is disconnected");
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        };
+                        tokio::pin!(cancelled);
+                        tokio::pin!(fut);
+                        match futures::future::select(cancelled, fut).await {
+                            Either::Left(_) => {}
+                            Either::Right(_) => {
+                                cancel_token.cancel();
+                            }
+                        }
+                    });
+                }
+
+                cancel_token.cancelled().await;
+                log::debug!("tokio runtime finished.");
+            });
+            system.shutdown().unwrap();
+        })
+    };
+
+    // system fails first -> cancel -> join
+    // thread fails first -> cancel -> shutdown
     system.run()?;
+    cancel_token.cancel();
+    helper_thread.join().unwrap();
+
     Ok(())
 }
