@@ -9,7 +9,7 @@ use color_eyre::{
     eyre::{Context as ContextTrait, ContextCompat},
     Result,
 };
-use comfy_table::presets::UTF8_FULL_CONDENSED;
+use comfy_table::{presets::UTF8_FULL_CONDENSED, CellAlignment};
 use ratatui::{backend::CrosstermBackend, widgets::Clear};
 use tonari_actor::{Actor, Addr, Context};
 
@@ -36,6 +36,7 @@ pub enum TuiMessage {
 }
 
 pub struct Tui {
+    header_state: widgets::header::HeaderState,
     profiler_addr: Addr<crate::profiler::Profiler>,
     terminal: Terminal,
     code: Vec<String>,
@@ -91,6 +92,17 @@ impl Tui {
             format!("{filename} ({dir}/)")
         };
         let num_lines = code.len();
+
+        let header_state = widgets::header::HeaderState {
+            pid: if config.pid == -1 {
+                "ALL".to_string()
+            } else {
+                config.pid.to_string()
+            },
+            python_bin: config.python_bin.clone(),
+            code_path: config.python_code.clone(),
+        };
+
         Ok(Self {
             profiler_addr,
             terminal,
@@ -98,20 +110,45 @@ impl Tui {
             _title: title,
             summary_map: Default::default(),
             scroll: Scroll::new(num_lines, 10),
+            header_state,
         })
     }
 
     pub fn render(&mut self) -> Result<()> {
         self.terminal.draw(|frame| {
-            // render parameters
+            frame.render_widget(Clear, frame.size());
 
+            // render parameters
+            let mut area = frame.size();
+            area.height = 10;
+            let mut table = comfy_table::Table::new();
+            table.load_preset(UTF8_FULL_CONDENSED);
+
+            table.add_row(["pid", &self.header_state.pid]);
+            table.add_row(["python", &self.header_state.python_bin]);
+            table.add_row(["code", &self.header_state.code_path]);
+            frame.render_widget(
+                widgets::table::Table {
+                    table,
+                    highlight_row: 999,
+                },
+                area,
+            );
             // render main table
+            let mut area = frame.size();
+            area.y += 5;
+            area.height -= 5;
             let mut table = comfy_table::Table::new();
             table.load_preset(UTF8_FULL_CONDENSED);
             table.set_header(vec![
                 "min", "p50", "p90", "p99", "max", "samples", "line", "code",
             ]);
-            self.scroll.resize_height(frame.size().height as usize - 4);
+            table
+                .column_mut(6)
+                .unwrap()
+                .set_cell_alignment(CellAlignment::Right);
+
+            self.scroll.resize_height(area.height as usize - 4);
             for i in self.scroll.range() {
                 if let Some(summary) = self.summary_map.get(&i) {
                     table.add_row([
@@ -133,8 +170,7 @@ impl Tui {
                 table,
                 highlight_row: self.scroll.current_line - self.scroll.scroll_offset,
             };
-            frame.render_widget(Clear, frame.size());
-            frame.render_widget(table, frame.size());
+            frame.render_widget(table, area);
         })?;
         Ok(())
     }
