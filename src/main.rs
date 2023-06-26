@@ -77,7 +77,9 @@ async fn run_system(config: Config) -> Result<()> {
         .await??;
 
     for handle in handles {
-        handle.await?;
+        if let Some(result) = handle.await? {
+            result?;
+        }
     }
 
     Ok(())

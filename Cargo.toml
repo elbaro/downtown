@@ -27,6 +27,8 @@ libc = "0.2.147"
 log = "0.4.19"
 pretty_env_logger = "0.5.0"
 ratatui = { version = "0.21.0", features = ["all-widgets"] }
+rustpython-ast = "0.2.0"
+rustpython-parser = "0.2.0"
 sudo = "0.6.0"
 syntect = "5.0.0"
 thiserror = "1.0.40"
