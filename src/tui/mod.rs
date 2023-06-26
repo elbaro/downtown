@@ -2,51 +2,48 @@ mod highlight;
 pub mod raw_input;
 pub mod scroll;
 pub mod widgets;
+pub type LineNum = usize;
+pub type Terminal = ratatui::Terminal<CrosstermBackend<std::io::Stdout>>;
 
-use std::{collections::HashMap, path::Path};
-
+use crate::{
+    cli::Config,
+    error::Error,
+    profiler::{
+        hist::{format_ns, Summary},
+        ProfilerCommand,
+    },
+    tui::scroll::Scroll,
+};
 use color_eyre::{
     eyre::{Context as ContextTrait, ContextCompat},
     Result,
 };
 use comfy_table::{presets::UTF8_FULL_CONDENSED, CellAlignment};
+use crossterm::event::KeyCode;
 use ratatui::{backend::CrosstermBackend, widgets::Clear};
-use tonari_actor::{Actor, Addr, Context};
-
-use crate::{
-    cli::Config,
-    profiler::{
-        hist::{format_ns, Summary},
-        ProfilerMessage,
-    },
-    tui::scroll::Scroll,
-};
-
-pub type LineNum = usize;
+use std::{collections::HashMap, path::Path};
+use xtra::prelude::*;
 
 #[derive(Debug)]
 pub enum TuiMessage {
-    ScrollUp,
-    ScrollDown,
-    PageUp,
-    PageDown,
-    Enter,
+    KeyEvent(KeyCode),
     Render,
-    Profile(HashMap<LineNum, Summary>),
+    Update,
+    // Profile(HashMap<LineNum, Summary>),
 }
 
+#[derive(Actor)]
 pub struct Tui {
     header_state: widgets::header::HeaderState,
-    profiler_addr: Addr<crate::profiler::Profiler>,
     terminal: Terminal,
     code: Vec<String>,
     _title: String,
-    // render state
+
+    // state
+    profiler_addr: Address<crate::profiler::Profiler>,
     scroll: Scroll,
     summary_map: HashMap<LineNum, Summary>,
 }
-
-pub type Terminal = ratatui::Terminal<CrosstermBackend<std::io::Stdout>>;
 
 fn setup_terminal() -> Result<Terminal> {
     crossterm::terminal::enable_raw_mode().context("failed to enable raw mode")?;
@@ -72,10 +69,15 @@ fn cleanup_terminal(terminal: &mut Terminal) -> Result<()> {
 }
 
 impl Tui {
-    pub fn new(config: &Config, profiler_addr: Addr<crate::profiler::Profiler>) -> Result<Self> {
+    pub fn new(config: &Config, profiler_addr: Address<crate::profiler::Profiler>) -> Result<Self> {
         let terminal = setup_terminal()?;
         let code: Vec<String> =
-            highlight::highlight(&std::fs::read_to_string(&config.python_code)?);
+            highlight::highlight(&std::fs::read_to_string(&config.python_code).map_err(
+                |source| Error::CannotReadFile {
+                    source,
+                    path: config.python_code.clone(),
+                },
+            )?);
         let title = {
             let filename = Path::new(&config.python_code)
                 .file_name()
@@ -174,6 +176,53 @@ impl Tui {
         })?;
         Ok(())
     }
+
+    async fn handle_impl(&mut self, msg: TuiMessage, ctx: &mut Context<Tui>) -> Result<()> {
+        match msg {
+            TuiMessage::KeyEvent(ev) => match ev {
+                KeyCode::Char('q') => {
+                    ctx.stop_self();
+                }
+                KeyCode::Up => {
+                    self.scroll.up(1);
+                    self.render()?;
+                }
+                KeyCode::Down => {
+                    self.scroll.down(1);
+                    self.render()?;
+                }
+                KeyCode::PageUp => {
+                    self.scroll.up(10);
+                    self.render()?;
+                }
+                KeyCode::PageDown => {
+                    self.scroll.down(10);
+                    self.render()?;
+                }
+                KeyCode::Enter => {
+                    self.profiler_addr
+                        .send(ProfilerCommand::ToggleFilter(
+                            crate::profiler::types::Filter {
+                                lineno: self.scroll.current_line + 1, // convert to 1-based
+                            },
+                        ))
+                        .await
+                        .context("failed to send ProfilerMessage::ToggleFilter")??;
+                }
+                _ => unreachable!(),
+            },
+            TuiMessage::Render => self.render()?,
+            TuiMessage::Update => {
+                let summary_map = self
+                    .profiler_addr
+                    .send(crate::profiler::request::Observe)
+                    .await??;
+                self.summary_map = summary_map;
+                self.render()?;
+            }
+        }
+        Ok(())
+    }
 }
 
 impl Drop for Tui {
@@ -184,52 +233,12 @@ impl Drop for Tui {
     }
 }
 
-impl Actor for Tui {
-    type Message = TuiMessage;
-    type Error = color_eyre::Report;
-    type Context = Context<Self::Message>;
-
-    fn handle(
-        &mut self,
-        _context: &mut Self::Context,
-        message: Self::Message,
-    ) -> Result<(), Self::Error> {
-        match message {
-            TuiMessage::ScrollUp => {
-                self.scroll.up(1);
-                self.render()?;
-            }
-            TuiMessage::ScrollDown => {
-                self.scroll.down(1);
-                self.render()?;
-            }
-            TuiMessage::PageUp => {
-                self.scroll.up(10);
-                self.render()?;
-            }
-            TuiMessage::PageDown => {
-                self.scroll.down(10);
-                self.render()?;
-            }
-            TuiMessage::Enter => {
-                self.profiler_addr
-                    .send(ProfilerMessage::ToggleFilter(
-                        crate::profiler::types::Filter {
-                            lineno: self.scroll.current_line + 1, // convert to 1-based
-                        },
-                    ))
-                    .context("failed to send ProfilerMessage::ToggleFilter")?;
-            }
-            TuiMessage::Render => self.render()?,
-            TuiMessage::Profile(summary_map) => {
-                self.summary_map = summary_map;
-                self.render()?;
-            }
+#[async_trait::async_trait]
+impl Handler<TuiMessage> for Tui {
+    type Return = ();
+    async fn handle(&mut self, msg: TuiMessage, ctx: &mut Context<Self>) {
+        if let Err(e) = self.handle_impl(msg, ctx).await {
+            log::error!("{}", e);
         }
-        Ok(())
-    }
-
-    fn name() -> &'static str {
-        "Tui"
     }
 }

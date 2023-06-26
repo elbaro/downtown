@@ -1,19 +1,20 @@
 pub mod cli;
+pub mod error;
 pub mod profiler;
 pub mod tui;
 
-use std::time::Duration;
-
 use crate::{
     cli::{Args, Config},
-    profiler::{types::ProfileTarget, Profiler, ProfilerMessage},
-    tui::{raw_input, Tui, TuiMessage},
+    profiler::{types::ProfileTarget, Profiler, ProfilerCommand},
+    tui::{raw_input::term_input_stream, Tui, TuiMessage},
 };
 use clap::Parser;
-
 use color_eyre::Result;
+use futures::StreamExt;
 use ratatui::backend::CrosstermBackend;
-use tonari_actor::{Addr, System};
+use std::time::Duration;
+use tokio_stream::wrappers::IntervalStream;
+use xtra::Mailbox;
 
 pub type Terminal = ratatui::Terminal<CrosstermBackend<std::io::Stdout>>;
 
@@ -29,38 +30,55 @@ fn main() -> Result<()> {
         .map_err(|_| color_eyre::eyre::eyre!("The program needs to run in privileged mode"))?;
 
     let config = Config::new(args)?;
+    validate_config(&config)?;
     run_system(config)?;
     Ok(())
 }
 
-fn run_system(config: Config) -> Result<()> {
-    let mut system = System::new("default");
+fn validate_config(_config: &Config) -> Result<()> {
+    // config.pid
+    // config.python_code
+    // config.python_bin
+    Ok(())
+}
 
-    let profiler_addr = Addr::default();
-    let tui_addr = system.spawn(Tui::new(&config, profiler_addr.clone())?)?;
-    tui_addr.send(TuiMessage::Render)?;
-    {
-        let system = system.clone();
-        let tui_addr = tui_addr.clone();
-        std::thread::spawn(move || raw_input::drain(system, tui_addr).unwrap());
+#[tokio::main(flavor = "current_thread")]
+async fn run_system(config: Config) -> Result<()> {
+    let profiler_addr = xtra::spawn_tokio(
+        Profiler::new(config.python_code.clone())?,
+        Mailbox::unbounded(),
+    );
+    let tui_addr = xtra::spawn_tokio(
+        Tui::new(&config, profiler_addr.clone())?,
+        Mailbox::unbounded(),
+    );
+    let mut handles = vec![];
+
+    let tui_addr_ = tui_addr.clone();
+    handles.push(tokio::spawn(xtra::scoped(
+        &tui_addr,
+        term_input_stream().forward(tui_addr_.into_sink()),
+    )));
+
+    let tui_addr_ = tui_addr.clone();
+    handles.push(tokio::spawn(xtra::scoped(
+        &tui_addr,
+        IntervalStream::new(tokio::time::interval(Duration::from_secs(1)))
+            .map(|_| Ok(TuiMessage::Update))
+            .forward(tui_addr_.into_sink()),
+    )));
+
+    tui_addr.send(TuiMessage::Render).await?;
+    profiler_addr
+        .send(ProfilerCommand::Attach(ProfileTarget {
+            pid: config.pid,
+            python_bin: config.python_bin,
+        }))
+        .await??;
+
+    for handle in handles {
+        handle.await?;
     }
 
-    let python_code = config.python_code.clone();
-    let profiler_addr = system
-        .prepare_fn(|| Profiler::new(python_code, tui_addr).unwrap())
-        .with_addr(profiler_addr)
-        .spawn()?;
-
-    profiler_addr.send(ProfilerMessage::Attach(ProfileTarget {
-        pid: config.pid,
-        python_bin: config.python_bin,
-    }))?;
-
-    std::thread::spawn(move || loop {
-        std::thread::sleep(Duration::from_secs(2));
-        let _ = profiler_addr.send(ProfilerMessage::Observe);
-    });
-
-    system.run()?;
     Ok(())
 }

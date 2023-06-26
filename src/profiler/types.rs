@@ -1,6 +1,12 @@
+use std::collections::HashMap;
+
+use libbpf_rs::Link;
+
+use crate::{profiler::hist::Summary, tui::LineNum};
+
 pub const USDT_PROVIDER: &str = "python";
 
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ProfileTarget {
     pub pid: i32,
     pub python_bin: String,
@@ -35,3 +41,14 @@ pub struct Filter {
     // pub funcname: String,
     pub lineno: usize,
 }
+
+// Since we only hold Link for reference-count purposes, it's Sendable.
+pub struct SendableLink(Link);
+impl SendableLink {
+    pub fn new(link: Link) -> Self {
+        Self(link)
+    }
+}
+unsafe impl Send for SendableLink {}
+
+pub type SummaryMap = HashMap<LineNum, Summary>;

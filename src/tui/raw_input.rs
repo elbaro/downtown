@@ -1,28 +1,28 @@
-use color_eyre::Result;
 use crossterm::event::{Event, KeyCode};
-use tonari_actor::{Addr, SystemHandle};
+use futures::{Stream, StreamExt};
 
-use crate::tui::{Tui, TuiMessage};
+use crate::tui::TuiMessage;
 
-pub fn drain(system: SystemHandle, tui_addr: Addr<Tui>) -> Result<()> {
-    loop {
-        let ev = crossterm::event::read()?;
+pub fn term_input_stream() -> impl Stream<Item = Result<TuiMessage, xtra::Error>> {
+    let stream = crossterm::event::EventStream::new();
+    stream.filter_map(|ev| async move {
         match ev {
-            Event::Key(ev) => match ev.code {
-                KeyCode::Char('q') => {
-                    system.shutdown()?;
-                }
-                KeyCode::Up => tui_addr.send(TuiMessage::ScrollUp)?,
-                KeyCode::Down => tui_addr.send(TuiMessage::ScrollDown)?,
-                KeyCode::PageUp => tui_addr.send(TuiMessage::PageUp)?,
-                KeyCode::PageDown => tui_addr.send(TuiMessage::PageDown)?,
-                KeyCode::Enter => tui_addr.send(TuiMessage::Enter)?,
-                _ => {}
+            Ok(ev) => match ev {
+                Event::Key(ev) => match ev.code {
+                    KeyCode::Char('q')
+                    | KeyCode::Up
+                    | KeyCode::Down
+                    | KeyCode::PageUp
+                    | KeyCode::PageDown
+                    | KeyCode::Enter => Some(Ok(TuiMessage::KeyEvent(ev.code))),
+                    _ => None,
+                },
+                _ => None,
             },
-            Event::Mouse(_ev) => {}
-            Event::Resize(_w, _h) => {}
-            _ => {}
+            Err(err) => {
+                log::error!("{}", err);
+                None
+            }
         }
-    }
-    // Ok(())
+    })
 }

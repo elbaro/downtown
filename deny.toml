@@ -75,6 +75,7 @@ allow = [
     "Unicode-DFS-2016",
     "BSD-2-Clause",
     "BSD-3-Clause",
+    "MPL-2.0",
     #"Apache-2.0 WITH LLVM-exception",
 ]
 # List of explicitly disallowed licenses
@@ -113,7 +114,11 @@ exceptions = [
 # Some crates don't have (easily) machine readable licensing information,
 # adding a clarification entry for it allows you to manually specify the
 # licensing information
-#[[licenses.clarify]]
+[[licenses.clarify]]
+name = "xtra-macros"
+expression = "MPL-2.0"
+license-files = []
+
 # The name of the crate the clarification applies to
 #name = "ring"
 # The optional version constraint for the crate

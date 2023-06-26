@@ -12,23 +12,36 @@ description = "A realtime BPF profiler"
 
 
 [dependencies]
-ansi-to-tui = "3.0.0"
+ansi-to-tui = "3.1.0"
+async-trait = "0.1.68"
 bytes = "1.4.0"
-clap = { version = "4.3.3", features = ["derive"] }
+clap = { version = "4.3.8", features = ["derive"] }
 clap-verbosity-flag = "2.0.1"
 color-eyre = "0.6.2"
 comfy-table = { version = "7.0.1", features = ["custom_styling"] }
 crossterm = { version = "0.26.1", features = ["event-stream"] }
 dotenvy = "0.15.7"
+futures = "0.3.28"
 libbpf-rs = "0.20.1"
-libc = "0.2.146"
-log = "0.4.18"
+libc = "0.2.147"
+log = "0.4.19"
 pretty_env_logger = "0.5.0"
 ratatui = { version = "0.21.0", features = ["all-widgets"] }
 sudo = "0.6.0"
 syntect = "5.0.0"
 thiserror = "1.0.40"
-tonari-actor = "0.8.3"
+tokio = { version = "1.28.2", default-features = false, features = [
+    "rt",
+    "time",
+    "macros",
+] }
+tokio-stream = "0.1.14"
+tokio-util = "0.7.8"
+xtra = { git = "https://github.com/Restioson/xtra", version = "0.6.0", rev = "d98393a115ea52656585c43df327d3e392833810", features = [
+    "tokio",
+    "sink",
+    "macros",
+] }
 
 [build-dependencies]
 libbpf-cargo = "0.20.1"
