@@ -1,37 +1,28 @@
-use color_eyre::Result;
 use crossterm::event::{Event, KeyCode};
-use futures::StreamExt;
-use tonari_actor::Addr;
+use futures::{Stream, StreamExt};
 
-use crate::{
-    error::Error,
-    tui::{Tui, TuiMessage},
-};
+use crate::tui::TuiMessage;
 
-pub async fn drain_term_input(tui_addr: Addr<Tui>) -> Result<()> {
-    let mut stream = crossterm::event::EventStream::new();
-    loop {
-        let ev: Option<Result<_, _>> = stream.next().await;
-        let ev = ev.ok_or(Error::InputStreamClosed)?;
-        let ev = ev.map_err(|source| Error::InputStreamError { source })?;
-
+pub fn term_input_stream() -> impl Stream<Item = Result<TuiMessage, xtra::Error>> {
+    let stream = crossterm::event::EventStream::new();
+    stream.filter_map(|ev| async move {
         match ev {
-            Event::Key(ev) => match ev.code {
-                KeyCode::Char('q') => {
-                    break;
-                }
-                KeyCode::Up => tui_addr.send(TuiMessage::ScrollUp)?,
-                KeyCode::Down => tui_addr.send(TuiMessage::ScrollDown)?,
-                KeyCode::PageUp => tui_addr.send(TuiMessage::PageUp)?,
-                KeyCode::PageDown => tui_addr.send(TuiMessage::PageDown)?,
-                KeyCode::Enter => tui_addr.send(TuiMessage::Enter)?,
-                _ => {}
+            Ok(ev) => match ev {
+                Event::Key(ev) => match ev.code {
+                    KeyCode::Char('q')
+                    | KeyCode::Up
+                    | KeyCode::Down
+                    | KeyCode::PageUp
+                    | KeyCode::PageDown
+                    | KeyCode::Enter => Some(Ok(TuiMessage::KeyEvent(ev.code))),
+                    _ => None,
+                },
+                _ => None,
             },
-            Event::Mouse(_ev) => {}
-            Event::Resize(_w, _h) => {}
-            _ => {}
+            Err(err) => {
+                log::error!("{}", err);
+                None
+            }
         }
-    }
-    log::debug!("drain_term_input() finished");
-    Ok(())
+    })
 }

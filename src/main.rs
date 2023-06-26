@@ -3,21 +3,18 @@ pub mod error;
 pub mod profiler;
 pub mod tui;
 
-use std::time::Duration;
-
 use crate::{
     cli::{Args, Config},
-    profiler::{types::ProfileTarget, Profiler, ProfilerMessage},
-    tui::{raw_input, Tui, TuiMessage},
+    profiler::{types::ProfileTarget, Profiler, ProfilerCommand},
+    tui::{raw_input::term_input_stream, Tui, TuiMessage},
 };
 use clap::Parser;
-
 use color_eyre::Result;
-use futures::future::Either;
+use futures::StreamExt;
 use ratatui::backend::CrosstermBackend;
-use tokio::pin;
-use tokio_util::sync::CancellationToken;
-use tonari_actor::{Addr, System, SystemHandle};
+use std::time::Duration;
+use tokio_stream::wrappers::IntervalStream;
+use xtra::Mailbox;
 
 pub type Terminal = ratatui::Terminal<CrosstermBackend<std::io::Stdout>>;
 
@@ -45,106 +42,43 @@ fn validate_config(_config: &Config) -> Result<()> {
     Ok(())
 }
 
-fn run_system(config: Config) -> Result<()> {
-    let cancel_token = CancellationToken::new();
-    let mut system = System::new("default");
+#[tokio::main(flavor = "current_thread")]
+async fn run_system(config: Config) -> Result<()> {
+    let profiler_addr = xtra::spawn_tokio(
+        Profiler::new(config.python_code.clone())?,
+        Mailbox::unbounded(),
+    );
+    let tui_addr = xtra::spawn_tokio(
+        Tui::new(&config, profiler_addr.clone())?,
+        Mailbox::unbounded(),
+    );
+    let mut handles = vec![];
 
-    let profiler_addr = Addr::default();
-    let tui_addr = system.spawn(Tui::new(&config, profiler_addr.clone())?)?;
-    tui_addr.send(TuiMessage::Render)?;
+    let tui_addr_ = tui_addr.clone();
+    handles.push(tokio::spawn(xtra::scoped(
+        &tui_addr,
+        term_input_stream().forward(tui_addr_.into_sink()),
+    )));
 
-    let python_code = config.python_code.clone();
-    let profiler_addr = {
-        let tui_addr = tui_addr.clone();
-        system
-            .prepare_fn(|| {
-                let result = Profiler::new(python_code, tui_addr);
-                result.unwrap()
-            })
-            .with_addr(profiler_addr)
-            .spawn()
-            .unwrap()
-    };
+    let tui_addr_ = tui_addr.clone();
+    handles.push(tokio::spawn(xtra::scoped(
+        &tui_addr,
+        IntervalStream::new(tokio::time::interval(Duration::from_secs(1)))
+            .map(|_| Ok(TuiMessage::Update))
+            .forward(tui_addr_.into_sink()),
+    )));
 
-    profiler_addr.send(ProfilerMessage::Attach(ProfileTarget {
-        pid: config.pid,
-        python_bin: config.python_bin,
-    }))?;
+    tui_addr.send(TuiMessage::Render).await?;
+    profiler_addr
+        .send(ProfilerCommand::Attach(ProfileTarget {
+            pid: config.pid,
+            python_bin: config.python_bin,
+        }))
+        .await??;
 
-    let helper_thread = {
-        let system: SystemHandle = system.clone();
-        let cancel_token = cancel_token.clone();
-        std::thread::spawn(move || {
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .enable_time()
-                .build()
-                .unwrap();
-
-            // task1 and task2 gracefully exit on cancel.
-            // task1 and task2 cancel when they fail.
-            rt.block_on(async {
-                // task 1
-                {
-                    let cancel_token = cancel_token.clone();
-                    tokio::spawn(async move {
-                        let cancelled = cancel_token.cancelled();
-                        let fut = raw_input::drain_term_input(tui_addr);
-                        pin!(cancelled);
-                        pin!(fut);
-                        match futures::future::select(cancelled, fut).await {
-                            Either::Left(_) => {} // cancelled
-                            Either::Right((result, _)) => {
-                                if let Err(err) = result {
-                                    log::error!("Error in raw_input thread: {}", err);
-                                }
-                                cancel_token.cancel();
-                            }
-                        }
-                    });
-                }
-
-                // task 2
-                {
-                    let cancel_token = cancel_token.clone();
-                    tokio::spawn(async move {
-                        let cancelled = cancel_token.cancelled();
-                        let fut = async {
-                            loop {
-                                tokio::time::sleep(Duration::from_secs(1)).await;
-                                if let Err(err) = profiler_addr.send(ProfilerMessage::Observe) {
-                                    match err.reason {
-                                        tonari_actor::SendErrorReason::Full => {}
-                                        tonari_actor::SendErrorReason::Disconnected => {
-                                            log::error!("Profiler actor is disconnected");
-                                            break;
-                                        }
-                                    }
-                                }
-                            }
-                        };
-                        tokio::pin!(cancelled);
-                        tokio::pin!(fut);
-                        match futures::future::select(cancelled, fut).await {
-                            Either::Left(_) => {}
-                            Either::Right(_) => {
-                                cancel_token.cancel();
-                            }
-                        }
-                    });
-                }
-
-                cancel_token.cancelled().await;
-                log::debug!("tokio runtime finished.");
-            });
-            system.shutdown().unwrap();
-        })
-    };
-
-    // system fails first -> cancel -> join
-    // thread fails first -> cancel -> shutdown
-    system.run()?;
-    cancel_token.cancel();
-    helper_thread.join().unwrap();
+    for handle in handles {
+        handle.await?;
+    }
 
     Ok(())
 }

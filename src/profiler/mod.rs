@@ -1,24 +1,21 @@
 pub mod hist;
 pub mod types;
-use types::*;
-
-use std::collections::{HashMap, HashSet};
-
-use color_eyre::Result;
-use libbpf_rs::Link;
-use tonari_actor::{Actor, Addr, Context};
-
 use crate::{
     profiler::{
         hist::{Histogram, Summary},
         python::PythonSkel,
     },
-    tui::{LineNum, Tui, TuiMessage},
+    tui::LineNum,
 };
+use types::*;
 
 pub mod python {
     include!(concat!(env!("OUT_DIR"), "/python.skel.rs"));
 }
+
+use color_eyre::Result;
+use std::collections::{HashMap, HashSet};
+use xtra::prelude::*;
 
 #[derive(Debug)]
 #[allow(non_camel_case_types)]
@@ -31,23 +28,39 @@ struct HistogramKey {
 }
 
 #[derive(Debug)]
-pub enum ProfilerMessage {
+pub enum ProfileAttribute {
+    Latency,
+    Gc,
+    Malloc,
+}
+
+// messages with return=Result<()>
+#[derive(Debug)]
+pub enum ProfilerCommand {
     Attach(ProfileTarget),
     Detach(ProfileTarget),
     ToggleFilter(Filter),
+    ToggleAttribute(ProfileAttribute),
     // AddFilter(Filter),
     // DelFilter(Filter),
-    Observe,
 }
+
+pub mod request {
+    pub struct Observe;
+    pub struct ListFilters {
+        _file: String,
+    }
+}
+
+#[derive(Actor)]
 
 pub struct Profiler {
     skel: PythonSkel<'static>,
-    links: HashMap<Probe, Link>,
-    tui_addr: Addr<Tui>,
+    links: HashMap<Probe, SendableLink>,
 }
 
 impl Profiler {
-    pub fn new(python_code: String, tui_addr: Addr<Tui>) -> Result<Self> {
+    pub fn new(python_code: String) -> Result<Self> {
         let skel_builder = python::PythonSkelBuilder::default();
         let mut open_skel: python::OpenPythonSkel = skel_builder.open()?;
 
@@ -61,22 +74,16 @@ impl Profiler {
         Ok(Self {
             skel,
             links: Default::default(),
-            tui_addr,
         })
     }
 }
-impl Actor for Profiler {
-    type Message = ProfilerMessage;
-    type Error = color_eyre::Report;
-    type Context = Context<Self::Message>;
 
-    fn handle(
-        &mut self,
-        _context: &mut Self::Context,
-        message: Self::Message,
-    ) -> std::result::Result<(), Self::Error> {
-        match message {
-            ProfilerMessage::Attach(target) => {
+#[async_trait::async_trait]
+impl Handler<ProfilerCommand> for Profiler {
+    type Return = Result<()>;
+    async fn handle(&mut self, cmd: ProfilerCommand, _: &mut Context<Self>) -> Self::Return {
+        match cmd {
+            ProfilerCommand::Attach(target) => {
                 // Attach FunctionReturn first
                 for usdt in UsdtName::ALL.iter().rev() {
                     self.links.insert(
@@ -84,20 +91,22 @@ impl Actor for Profiler {
                             target: target.clone(),
                             usdt_name: *usdt,
                         },
-                        self.skel
-                            .obj
-                            .prog_mut(usdt.as_str())
-                            .expect("bpf program error")
-                            .attach_usdt(
-                                target.pid,
-                                &target.python_bin,
-                                USDT_PROVIDER,
-                                usdt.as_str(),
-                            )?,
+                        SendableLink::new(
+                            self.skel
+                                .obj
+                                .prog_mut(usdt.as_str())
+                                .expect("bpf program error")
+                                .attach_usdt(
+                                    target.pid,
+                                    &target.python_bin,
+                                    USDT_PROVIDER,
+                                    usdt.as_str(),
+                                )?,
+                        ),
                     );
                 }
             }
-            ProfilerMessage::Detach(target) => {
+            ProfilerCommand::Detach(target) => {
                 for usdt in UsdtName::ALL.iter().rev() {
                     self.links.remove(&Probe {
                         target: target.clone(),
@@ -105,7 +114,7 @@ impl Actor for Profiler {
                     });
                 }
             }
-            ProfilerMessage::ToggleFilter(filter) => {
+            ProfilerCommand::ToggleFilter(filter) => {
                 let mut maps = self.skel.maps_mut();
                 let lineno = filter.lineno.to_ne_bytes();
 
@@ -120,63 +129,67 @@ impl Actor for Profiler {
                     maps.filter_map().delete(&lineno)?;
                 }
             }
-            ProfilerMessage::Observe => {
-                let maps = self.skel.maps();
-                let allowed_lines: HashSet<u64> = maps
-                    .filter_map()
-                    .keys()
-                    .map(|bytes| u64::from_ne_bytes(bytes.try_into().unwrap()))
-                    .collect();
-                let mut histograms = HashMap::<Filter, Histogram>::new();
-                let mut summary_map = HashMap::<LineNum, Summary>::new();
-                let map = maps.latency_map();
-                let mut keys_to_delete = vec![];
-                for bytes_key in map.keys() {
-                    let value = map.lookup(&bytes_key, libbpf_rs::MapFlags::ANY)?.unwrap();
-                    let value = u64::from_ne_bytes(value.try_into().unwrap());
-
-                    unsafe {
-                        let key: *const HistogramKey = std::mem::transmute(bytes_key.as_ptr());
-                        // let filename = std::ffi::CStr::from_ptr((*key).filename.as_ptr())
-                        //     .to_str()
-                        //     .unwrap();
-                        // let funcname = std::ffi::CStr::from_ptr((*key).funcname.as_ptr())
-                        //     .to_str()
-                        //     .unwrap();
-                        let lineno = (*key).lineno;
-
-                        if !allowed_lines.contains(&lineno) {
-                            keys_to_delete.push(bytes_key);
-                            continue;
-                        }
-
-                        let bucket = (*key).bucket;
-                        let filter = Filter {
-                            // filename: filename.to_string(),
-                            // funcname: funcname.to_string(),
-                            lineno: lineno as usize,
-                        };
-                        histograms
-                            .entry(filter)
-                            .or_default()
-                            .add(bucket as usize, value);
-                    }
-                }
-                let mut maps = self.skel.maps_mut();
-                for key in keys_to_delete {
-                    maps.latency_map().delete(&key)?;
-                }
-
-                for (filter, hist) in histograms {
-                    summary_map.insert(filter.lineno, hist.summary());
-                }
-                self.tui_addr.send(TuiMessage::Profile(summary_map))?;
+            ProfilerCommand::ToggleAttribute(_) => {
+                todo!()
             }
         }
         Ok(())
     }
+}
 
-    fn name() -> &'static str {
-        "Profiler"
+#[async_trait::async_trait]
+impl Handler<request::Observe> for Profiler {
+    type Return = Result<SummaryMap>;
+    async fn handle(&mut self, _: request::Observe, _: &mut Context<Self>) -> Self::Return {
+        let maps = self.skel.maps();
+        let allowed_lines: HashSet<u64> = maps
+            .filter_map()
+            .keys()
+            .map(|bytes| u64::from_ne_bytes(bytes.try_into().unwrap()))
+            .collect();
+        let mut histograms = HashMap::<Filter, Histogram>::new();
+        let mut summary_map = HashMap::<LineNum, Summary>::new();
+        let map = maps.latency_map();
+        let mut keys_to_delete = vec![];
+        for bytes_key in map.keys() {
+            let value = map.lookup(&bytes_key, libbpf_rs::MapFlags::ANY)?.unwrap();
+            let value = u64::from_ne_bytes(value.try_into().unwrap());
+
+            unsafe {
+                let key: *const HistogramKey = std::mem::transmute(bytes_key.as_ptr());
+                // let filename = std::ffi::CStr::from_ptr((*key).filename.as_ptr())
+                //     .to_str()
+                //     .unwrap();
+                // let funcname = std::ffi::CStr::from_ptr((*key).funcname.as_ptr())
+                //     .to_str()
+                //     .unwrap();
+                let lineno = (*key).lineno;
+
+                if !allowed_lines.contains(&lineno) {
+                    keys_to_delete.push(bytes_key);
+                    continue;
+                }
+
+                let bucket = (*key).bucket;
+                let filter = Filter {
+                    // filename: filename.to_string(),
+                    // funcname: funcname.to_string(),
+                    lineno: lineno as usize,
+                };
+                histograms
+                    .entry(filter)
+                    .or_default()
+                    .add(bucket as usize, value);
+            }
+        }
+        let mut maps = self.skel.maps_mut();
+        for key in keys_to_delete {
+            maps.latency_map().delete(&key)?;
+        }
+
+        for (filter, hist) in histograms {
+            summary_map.insert(filter.lineno, hist.summary());
+        }
+        Ok(summary_map)
     }
 }
