@@ -44,6 +44,9 @@ fn validate_config(_config: &Config) -> Result<()> {
 
 #[tokio::main(flavor = "current_thread")]
 async fn run_system(config: Config) -> Result<()> {
+    tui::code::PythonCode::new(config.python_code.clone()).await?;
+    return Ok(());
+
     let profiler_addr = xtra::spawn_tokio(
         Profiler::new(config.python_code.clone())?,
         Mailbox::unbounded(),

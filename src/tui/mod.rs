@@ -1,3 +1,4 @@
+pub mod code;
 mod highlight;
 pub mod raw_input;
 pub mod scroll;
@@ -71,6 +72,7 @@ fn cleanup_terminal(terminal: &mut Terminal) -> Result<()> {
 impl Tui {
     pub fn new(config: &Config, profiler_addr: Address<crate::profiler::Profiler>) -> Result<Self> {
         let terminal = setup_terminal()?;
+
         let code: Vec<String> =
             highlight::highlight(&std::fs::read_to_string(&config.python_code).map_err(
                 |source| Error::CannotReadFile {
