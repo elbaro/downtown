@@ -6,6 +6,7 @@ use crate::tui::LineNum;
 
 pub struct PythonCode {
     pub path: String,
+    pub source: String,
     pub funcs: Vec<(LineNum, String)>,
 }
 
@@ -54,7 +55,40 @@ impl PythonCode {
 
         Ok(Self {
             path,
+            source,
             funcs: visitor.funcs,
         })
+    }
+
+    pub fn jump_to_prev_fn(&self, line: usize) -> Option<usize> {
+        let idx = match self.funcs.binary_search_by_key(&line, |&(line, _)| line) {
+            Ok(idx) => idx,
+            Err(idx) => idx,
+        };
+
+        if idx == 0 {
+            None
+        } else {
+            Some(self.funcs[idx - 1].0)
+        }
+    }
+
+    pub fn jump_to_next_fn(&self, line: usize) -> Option<usize> {
+        match self.funcs.binary_search_by_key(&line, |&(line, _)| line) {
+            Ok(idx) => {
+                if idx + 1 == self.funcs.len() {
+                    None
+                } else {
+                    Some(self.funcs[idx + 1].0)
+                }
+            }
+            Err(idx) => {
+                if idx < self.funcs.len() {
+                    Some(self.funcs[idx].0)
+                } else {
+                    None
+                }
+            }
+        }
     }
 }

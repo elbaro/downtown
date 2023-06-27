@@ -8,12 +8,11 @@ pub type Terminal = ratatui::Terminal<CrosstermBackend<std::io::Stdout>>;
 
 use crate::{
     cli::Config,
-    error::Error,
     profiler::{
         hist::{format_ns, Summary},
         ProfilerCommand,
     },
-    tui::scroll::Scroll,
+    tui::{code::PythonCode, scroll::Scroll},
 };
 use color_eyre::{
     eyre::{Context as ContextTrait, ContextCompat},
@@ -37,7 +36,8 @@ pub enum TuiMessage {
 pub struct Tui {
     header_state: widgets::header::HeaderState,
     terminal: Terminal,
-    code: Vec<String>,
+    code: PythonCode,
+    highlighted: Vec<String>,
     _title: String,
 
     // state
@@ -70,16 +70,14 @@ fn cleanup_terminal(terminal: &mut Terminal) -> Result<()> {
 }
 
 impl Tui {
-    pub fn new(config: &Config, profiler_addr: Address<crate::profiler::Profiler>) -> Result<Self> {
+    pub fn new(
+        config: &Config,
+        code: PythonCode,
+        profiler_addr: Address<crate::profiler::Profiler>,
+    ) -> Result<Self> {
         let terminal = setup_terminal()?;
 
-        let code: Vec<String> =
-            highlight::highlight(&std::fs::read_to_string(&config.python_code).map_err(
-                |source| Error::CannotReadFile {
-                    source,
-                    path: config.python_code.clone(),
-                },
-            )?);
+        let highlighted: Vec<String> = highlight::highlight(&code.source);
         let title = {
             let filename = Path::new(&config.python_code)
                 .file_name()
@@ -95,7 +93,7 @@ impl Tui {
                 .to_string();
             format!("{filename} ({dir}/)")
         };
-        let num_lines = code.len();
+        let num_lines = highlighted.len();
 
         let header_state = widgets::header::HeaderState {
             pid: if config.pid == -1 {
@@ -111,6 +109,7 @@ impl Tui {
             profiler_addr,
             terminal,
             code,
+            highlighted,
             _title: title,
             summary_map: Default::default(),
             scroll: Scroll::new(num_lines, 10),
@@ -163,11 +162,11 @@ impl Tui {
                         format_ns(summary.max),
                         summary.samples.to_string(),
                         i.to_string(),
-                        self.code[i - 1].clone(),
+                        self.highlighted[i - 1].clone(),
                     ]);
                 } else {
                     let ii = i.to_string();
-                    table.add_row(["", "", "", "", "", "", &ii, &self.code[i - 1]]);
+                    table.add_row(["", "", "", "", "", "", &ii, &self.highlighted[i - 1]]);
                 }
             }
             let table = widgets::table::Table {
@@ -194,12 +193,16 @@ impl Tui {
                     self.render()?;
                 }
                 KeyCode::PageUp => {
-                    self.scroll.up(10);
-                    self.render()?;
+                    if let Some(line) = self.code.jump_to_prev_fn(self.scroll.current_line) {
+                        self.scroll.up(self.scroll.current_line - line);
+                        self.render()?;
+                    }
                 }
                 KeyCode::PageDown => {
-                    self.scroll.down(10);
-                    self.render()?;
+                    if let Some(line) = self.code.jump_to_next_fn(self.scroll.current_line) {
+                        self.scroll.down(line - self.scroll.current_line);
+                        self.render()?;
+                    }
                 }
                 KeyCode::Enter => {
                     self.profiler_addr
