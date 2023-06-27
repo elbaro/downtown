@@ -44,12 +44,14 @@ fn validate_config(_config: &Config) -> Result<()> {
 
 #[tokio::main(flavor = "current_thread")]
 async fn run_system(config: Config) -> Result<()> {
+    let code = tui::code::PythonCode::new(config.python_code.clone()).await?;
+
     let profiler_addr = xtra::spawn_tokio(
         Profiler::new(config.python_code.clone())?,
         Mailbox::unbounded(),
     );
     let tui_addr = xtra::spawn_tokio(
-        Tui::new(&config, profiler_addr.clone())?,
+        Tui::new(&config, code, profiler_addr.clone())?,
         Mailbox::unbounded(),
     );
     let mut handles = vec![];
@@ -77,7 +79,9 @@ async fn run_system(config: Config) -> Result<()> {
         .await??;
 
     for handle in handles {
-        handle.await?;
+        if let Some(result) = handle.await? {
+            result?;
+        }
     }
 
     Ok(())

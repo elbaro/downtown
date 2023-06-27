@@ -27,10 +27,15 @@ libc = "0.2.147"
 log = "0.4.19"
 pretty_env_logger = "0.5.0"
 ratatui = { version = "0.21.0", features = ["all-widgets"] }
+rustpython-ast = { git = "https://github.com/RustPython/Parser", rev = "69d27d924c877b6f2fa5dc75c9589ab505d5b3f1", features = [
+    "visitor",
+] }
+rustpython-parser = { git = "https://github.com/RustPython/Parser", rev = "69d27d924c877b6f2fa5dc75c9589ab505d5b3f1" }
 sudo = "0.6.0"
 syntect = "5.0.0"
 thiserror = "1.0.40"
 tokio = { version = "1.28.2", default-features = false, features = [
+    "fs",
     "rt",
     "time",
     "macros",

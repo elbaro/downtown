@@ -2,7 +2,7 @@ pub struct Scroll {
     num_lines: usize,
     widget_height: usize,
 
-    pub current_line: usize, // 0-based
+    pub current_line: usize, // 1-based
     pub scroll_offset: usize,
 }
 
@@ -11,15 +11,15 @@ impl Scroll {
         Self {
             num_lines,
             widget_height,
-            current_line: 0,
-            scroll_offset: 0,
+            current_line: 1,
+            scroll_offset: 1,
         }
     }
     pub fn up(&mut self, delta: usize) {
-        if delta <= self.current_line {
+        if delta < self.current_line {
             self.current_line -= delta;
         } else {
-            self.current_line = 0;
+            self.current_line = 1;
         }
 
         if self.scroll_offset > self.current_line {
@@ -27,13 +27,13 @@ impl Scroll {
         }
     }
     pub fn down(&mut self, delta: usize) {
-        if self.current_line + delta < self.num_lines {
+        if self.current_line + delta <= self.num_lines {
             self.current_line += delta;
         } else {
-            self.current_line = self.num_lines - 1;
+            self.current_line = self.num_lines;
         }
         if self.scroll_offset + self.widget_height <= self.current_line {
-            self.scroll_offset = self.current_line - self.widget_height;
+            self.scroll_offset = self.current_line - self.widget_height + 1;
         }
     }
 
@@ -45,7 +45,6 @@ impl Scroll {
     }
 
     pub fn range(&self) -> std::ops::Range<usize> {
-        (1 + self.scroll_offset)
-            ..(1 + self.scroll_offset + self.widget_height).min(self.num_lines + 1)
+        (self.scroll_offset)..(self.scroll_offset + self.widget_height).min(self.num_lines + 1)
     }
 }
