@@ -1,5 +1,4 @@
 class A:
-    @aa
     def f(self):
         a = 1
         for i in range(100):

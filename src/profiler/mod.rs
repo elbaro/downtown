@@ -59,16 +59,19 @@ pub struct Profiler {
     links: HashMap<Probe, SendableLink>,
 }
 
+pub fn hash_path(s: &str) -> u64 {
+    let mut h = 0u64;
+    for b in s.bytes() {
+        h = h.wrapping_mul(37).wrapping_add(b as u64);
+    }
+    h
+}
+
 impl Profiler {
     pub fn new(python_code: String) -> Result<Self> {
         let skel_builder = python::PythonSkelBuilder::default();
         let mut open_skel: python::OpenPythonSkel = skel_builder.open()?;
-
-        // 127 bytes [0..=126] + 1 byte [127] = 128 bytes
-        let len = python_code.len().min(127);
-        open_skel.bss().FILTER_FILENAME[..len]
-            .copy_from_slice(unsafe { std::mem::transmute(&python_code.as_bytes()[..len]) });
-        open_skel.bss().FILTER_FILENAME[len] = 0; // NUL-terminated
+        open_skel.bss().FILTER_PATH_HASH = hash_path(&python_code);
         let skel = open_skel.load()?;
 
         Ok(Self {

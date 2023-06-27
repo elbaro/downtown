@@ -10,7 +10,7 @@
 #include "str.h"
 
 char LICENSE[] SEC("license") = "GPL";
-volatile char FILTER_FILENAME[128] SEC(".bss");
+volatile u64 FILTER_PATH_HASH = 0;
 
 struct bpf_map_create_opts;
 int bpf_map_create(enum bpf_map_type map_type,
@@ -106,12 +106,23 @@ int function__return(struct pt_regs *ctx)
 	bpf_map_update_elem(&indent_map, &tid, &indent, BPF_ANY);
 
 	// filter with filename
-	const char* arg_filename;
-	bpf_usdt_arg(ctx, 0, (long*)(&arg_filename));
-	char filename[128];
-	bpf_probe_read_user_str(filename, sizeof(filename), arg_filename);
+	const char* arg_path;
+	bpf_usdt_arg(ctx, 0, (long*)(&arg_path));
+	u64 path_hash = 0;
+	char path[128];
 
-	if (!streqn(FILTER_FILENAME, filename, 128)) {
+	for (int bound_loop=0;bound_loop<16;bound_loop++) {
+		path[127] = 0;
+		int copied = bpf_probe_read_user_str(path, sizeof(path), arg_path);
+		for (int i = 0; i < copied; i++) {
+			if (path[i] == '\0') { break; }
+			path_hash = path_hash * 37 + path[i];
+		}
+		if (copied < 128 || path[127] == '\0') { break; }
+	}
+	
+
+	if (path_hash != FILTER_PATH_HASH) {
 		return 0;
 	}
 
