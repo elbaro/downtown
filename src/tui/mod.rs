@@ -208,7 +208,7 @@ impl Tui {
                     self.profiler_addr
                         .send(ProfilerCommand::ToggleFilter(
                             crate::profiler::types::Filter {
-                                lineno: self.scroll.current_line + 1, // convert to 1-based
+                                lineno: self.scroll.current_line, // convert to 1-based
                             },
                         ))
                         .await
