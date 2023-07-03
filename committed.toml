@@ -2,3 +2,15 @@ style = "conventional"
 subject_capitalized = false
 merge_commit = false
 ignore_author_re = "(dependabot|renovate|github-actions)"
+no_wip = false
+allowed_types = [
+    "fix",
+    "feat",
+    "chore",
+    "docs",
+    "style",
+    "refactor",
+    "perf",
+    "test",
+    "wip",
+]

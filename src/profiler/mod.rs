@@ -39,7 +39,7 @@ pub enum ProfileAttribute {
 pub enum ProfilerCommand {
     Attach(ProfileTarget),
     Detach(ProfileTarget),
-    ToggleFilter(Filter),
+    ToggleFilter(Target),
     ToggleAttribute(ProfileAttribute),
     // AddFilter(Filter),
     // DelFilter(Filter),
@@ -150,7 +150,7 @@ impl Handler<request::Observe> for Profiler {
             .keys()
             .map(|bytes| u64::from_ne_bytes(bytes.try_into().unwrap()))
             .collect();
-        let mut histograms = HashMap::<Filter, Histogram>::new();
+        let mut histograms = HashMap::<Target, Histogram>::new();
         let mut summary_map = HashMap::<LineNum, Summary>::new();
         let map = maps.latency_map();
         let mut keys_to_delete = vec![];
@@ -174,7 +174,7 @@ impl Handler<request::Observe> for Profiler {
                 }
 
                 let bucket = (*key).bucket;
-                let filter = Filter {
+                let filter = Target {
                     // filename: filename.to_string(),
                     // funcname: funcname.to_string(),
                     lineno: lineno as usize,

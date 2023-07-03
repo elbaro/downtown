@@ -1,5 +1,6 @@
 pub mod code;
 mod highlight;
+pub mod layout;
 pub mod raw_input;
 pub mod scroll;
 pub mod widgets;
@@ -207,7 +208,7 @@ impl Tui {
                 KeyCode::Enter => {
                     self.profiler_addr
                         .send(ProfilerCommand::ToggleFilter(
-                            crate::profiler::types::Filter {
+                            crate::profiler::types::Target {
                                 lineno: self.scroll.current_line, // convert to 1-based
                             },
                         ))

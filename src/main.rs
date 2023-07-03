@@ -1,3 +1,5 @@
+#![allow(clippy::manual_non_exhaustive)]
+
 pub mod cli;
 pub mod error;
 pub mod profiler;
