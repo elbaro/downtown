@@ -18,5 +18,6 @@ v0.1.0 - supports Python.
 - enter - toggle
 
 ## Requirement
+- libelf (Ubuntu: apt install libelf-dev)
 - Python built with --with-dtrace
     - on Linux, verify with `readelf -S ./python | grep .note.stapsdt`
